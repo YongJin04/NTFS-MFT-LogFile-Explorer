@@ -20,7 +20,16 @@ def parse_logfile(logfile_path, output_path):
         while current_number_of_logfile_page < max_number_of_logfile_page:
             logfile.seek(current_number_of_logfile_page * LOGFILE_PAGE_SIZE)  # Move to 'RCRD Page'
             rcrd_header = read_struct(logfile, RCRD_HEADER_STRUCTURE, RCRDHeader)
-            current_page_data = logfile.read(rcrd_header.next_record_offset - struct.calcsize(RCRD_HEADER_STRUCTURE))
+            
+            _hdr_size = struct.calcsize(RCRD_HEADER_STRUCTURE)
+            _nro = getattr(rcrd_header, "next_record_offset", None)
+            if not isinstance(_nro, int):
+                raise ValueError(f"Invalid next_record_offset type: {type(_nro)}")
+            if _nro < _hdr_size or _nro > LOGFILE_PAGE_SIZE:
+                current_number_of_logfile_page += 1
+                continue
+            _read_len = _nro - _hdr_size
+            current_page_data = logfile.read(_read_len)
 
             record_types = [1, 2]  # 0x01 : Update Record, Commit Record / 0x02 : Checkpoint Record
             offset_to_log_records = find_hex(current_page_data, record_types, 2)
