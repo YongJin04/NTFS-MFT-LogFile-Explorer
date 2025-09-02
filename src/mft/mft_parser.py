@@ -1,5 +1,8 @@
 import sqlite3
 import os
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 from src.types.ntfs_structs import *
 from src.db.sqlite_manager import *
@@ -30,6 +33,13 @@ def parse_mft(mft_path, output_path):
                 file_name_attribute = None
                 next_file_name_attribute = None
                 file_name = None
+                file_name_long = None
+                file_name_short = None
+                data_resident_flag = None
+                data_file_size = None
+                data_slack_size = None
+                data_data = None
+
                 while(True):                    
                     common_attribute_header = read_struct(mft, COMMON_ATTRIBUTE_HEADER_STRUCTURE, CommonAttributeHeader)
 
@@ -48,41 +58,133 @@ def parse_mft(mft_path, output_path):
 
                         if (next_common_attribute_header.attr_type == 0x30 and  # Second $FILE_NAME
                             next_common_attribute_header.flag == 0x00):
-                            next_resident_attribute_header = read_struct(mft, RESIDENT_ATTRIBUTE_HEADER_STRUCTURE, ResidentAttributeHeader)
-                            next_file_name_attribute = read_struct(mft, FILE_NAME, FileName)
-                            file_name = read_file_name(mft, next_file_name_attribute)
+                            if (common_attribute_header.attr_length < next_common_attribute_header.attr_length):
+                                next_resident_attribute_header = read_struct(mft, RESIDENT_ATTRIBUTE_HEADER_STRUCTURE, ResidentAttributeHeader)
+                                next_file_name_attribute = read_struct(mft, FILE_NAME, FileName)
+                                file_name_long = read_file_name(mft, next_file_name_attribute)
+                                mft.seek(((mft.tell() + 0x07) & ~0x07))
 
+                                print(f"3 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_long}")
+
+                            else:
+                                mft.seek(-(common_attribute_header.attr_length), 1)  # Move first $FILE_NAME
+                                resident_attribute_header = read_struct(mft, RESIDENT_ATTRIBUTE_HEADER_STRUCTURE, ResidentAttributeHeader)
+                                file_name_attribute = read_struct(mft, FILE_NAME, FileName)
+                                file_name_short = read_file_name(mft, file_name_attribute)
+                                mft.seek(((mft.tell() + 0x07) & ~0x07))
+
+                                print(f"2 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_short}")
+                        
                         else:
                             mft.seek(-(common_attribute_header.attr_length), 1)  # Move first $FILE_NAME
                             resident_attribute_header = read_struct(mft, RESIDENT_ATTRIBUTE_HEADER_STRUCTURE, ResidentAttributeHeader)
                             file_name_attribute = read_struct(mft, FILE_NAME, FileName)
-                            file_name = read_file_name(mft, file_name_attribute)
-                        # print(file_name)
+                            file_name_long = read_file_name(mft, file_name_attribute)
+                            mft.seek(((mft.tell() + 0x07) & ~0x07))
+
+                            print(f"1 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_long}")
+
+                    elif (common_attribute_header.attr_type == 0x80):  # $DATA
+                        COMMON_HDR_SIZE = struct.calcsize(COMMON_ATTRIBUTE_HEADER_STRUCTURE)
+                        NONRES_HDR_SIZE = struct.calcsize(NON_RESIDENT_ATTRIBUTE_HEADER_STRUCTURE)
+
+                        is_nonresident = getattr(common_attribute_header, "non_resident_flag", getattr(common_attribute_header, "flag", 0x00)) == 0x01
+
+                        if is_nonresident:  # Non-Resident
+                            if (common_attribute_header.attr_length == 0x40):
+                                break
+
+                            non_resident_attribute_header = read_struct(mft, NON_RESIDENT_ATTRIBUTE_HEADER_STRUCTURE, NonResidentAttributeHeader)
+
+                            file_size = non_resident_attribute_header.used_size_of_content
+                            file_slack_size = 0x1000 - (file_size % 0x1000)
+                            size_of_runlist = common_attribute_header.attr_length - (COMMON_HDR_SIZE + NONRES_HDR_SIZE)
+                            if size_of_runlist < 0:
+                                size_of_runlist = 0
+                            runlist = mft.read(size_of_runlist)
+
+                            pos = 0
+                            while pos < len(runlist):
+                                hdr = runlist[pos]
+                                pos += 1
+                                if hdr == 0x00:
+                                    break
+                                len_len  = hdr & 0x0F
+                                off_len  = hdr >> 4
+                                pos += len_len + off_len
+                            runlist = runlist[:pos]
+
+                            runlist_preview = runlist.hex() if runlist else ""
+                            print(f"File Size: 0x{file_size:X}, Slack Size: 0x{file_slack_size:X}, Runlist: {runlist_preview}, LengthOfRunlist: 0x{size_of_runlist:X}")
+
+                            data_resident_flag = 0x01
+                            data_file_size = file_size
+                            data_slack_size = file_slack_size
+                            data_data = "0x" + (runlist.hex() if runlist else "")
+
+                        else:  # Resident
+                            if (common_attribute_header.attr_length == 0x18):
+                                break
+
+                            resident_attribute_header = read_struct(mft, RESIDENT_ATTRIBUTE_HEADER_STRUCTURE, ResidentAttributeHeader)
+
+                            file_size = resident_attribute_header.size_of_content
+                            file_allocation_size = (resident_attribute_header.size_of_content + 3) & ~0x03
+                            slack_size = resident_attribute_header.size_of_content % 4
+                            if file_size < 0:
+                                file_size = 0
+                            file_data = mft.read(file_size)
+                            data_preview = file_data.hex() if file_data else ""
+                            print(f"File Size: 0x{file_size:X},  slack Size: 0x{slack_size:X}, Data: 0x{data_preview}")
+
+                            data_resident_flag = 0x00
+                            data_file_size = file_size
+                            data_slack_size = slack_size
+                            data_data = "0x" + (file_data.hex() if file_data else "")
+
                         break
                     
-                    elif (0x40 <= common_attribute_header.attr_type):  # $STANDARD_INFORMATION or $FILE_NAME does not exist
+                    elif (0x90 <= common_attribute_header.attr_type):  # $DATA does not exist
                         break
 
                     else:
                         mft.seek(common_attribute_header.attr_length - struct.calcsize(COMMON_ATTRIBUTE_HEADER_STRUCTURE), 1)  # Move next Attribute
+                        # print(f"Next Attribute : {hex(common_attribute_header.attr_length - struct.calcsize(COMMON_ATTRIBUTE_HEADER_STRUCTURE))}")
 
                 if standard_information_attribute is not None:
                     if next_file_name_attribute is not None:  # Second $FILE_NAME attribute exists
-                        row = make_row(mft_entry_header, standard_information_attribute, next_file_name_attribute, file_name)
+                        row = make_row(
+                            mft_entry_header,
+                            standard_information_attribute,
+                            next_file_name_attribute,
+                            (file_name_long if file_name_long is not None else file_name_short),
+                            data_resident_flag, data_file_size, data_slack_size, data_data
+                        )
                     elif file_name_attribute is not None:  # First $FILE_NAME attribute exists
-                        row = make_row(mft_entry_header, standard_information_attribute, file_name_attribute, file_name)
+                        row = make_row(
+                            mft_entry_header,
+                            standard_information_attribute,
+                            file_name_attribute,
+                            (file_name_long if file_name_long is not None else file_name_short),
+                            data_resident_flag, data_file_size, data_slack_size, data_data
+                        )
                     else:
-                        row = make_row(mft_entry_header, standard_information_attribute, None, None)
+                        row = make_row(
+                            mft_entry_header,
+                            standard_information_attribute,
+                            None, None,
+                            data_resident_flag, data_file_size, data_slack_size, data_data
+                        )
 
                     row_buffer.append(row)
                     if len(row_buffer) >= BATCH_SIZE:
                         flush_buffer()
 
-            else:  # Invalid MFT Entry
+            else:
                 pass
 
             current_number_of_mft_entry = current_number_of_mft_entry + 1
-            # print(current_number_of_mft_entry)
+            print()
 
         flush_buffer()
 
@@ -200,6 +302,12 @@ CREATE TABLE IF NOT EXISTS MFT (
     "file_name.length_of_name" INTEGER,
     "file_name.name_space" INTEGER,
     "file_name.file_name" TEXT,
+
+    "data.resident_flag" INTEGER,
+    "data.file_size" INTEGER,
+    "data.slack_size" INTEGER,
+    "data.data" TEXT,
+
     "file_path" TEXT
 );
 """
@@ -245,9 +353,15 @@ INSERT_COLUMNS = (
     "file_name.length_of_name",
     "file_name.name_space",
     "file_name.file_name",
+
+    "data.resident_flag",
+    "data.file_size",
+    "data.slack_size",
+    "data.data",
 )
 
-def make_row(mft_entry_header, standard_information_attribute, file_name_attribute, file_name):
+def make_row(mft_entry_header, standard_information_attribute, file_name_attribute, file_name,
+             data_resident_flag, data_file_size, data_slack_size, data_data):
     def hx(v, width=None):
         if v is None:
             return None
@@ -297,7 +411,12 @@ def make_row(mft_entry_header, standard_information_attribute, file_name_attribu
         hx(getattr(file_name_attribute, 'reparse', None), 8),
         hx(getattr(file_name_attribute, 'length_of_name', None), 8),
         hx(getattr(file_name_attribute, 'name_space', None), 8),
-        file_name
+        file_name,
+
+        hx(data_resident_flag, 2),
+        hx(data_file_size, 16),
+        hx(data_slack_size, 16),
+        data_data
     )
 
 INSERT_SQL = "INSERT INTO MFT ({cols}) VALUES ({ph});".format(
@@ -306,6 +425,9 @@ INSERT_SQL = "INSERT INTO MFT ({cols}) VALUES ({ph});".format(
 )
 
 def read_file_name(file_obj, file_name_attribute):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
     """
     Reads a UTF-16LE-encoded file name from the file,
     skipping invalid surrogate pairs if needed.
