@@ -64,7 +64,7 @@ def parse_mft(mft_path, output_path):
                                 file_name_long = read_file_name(mft, next_file_name_attribute)
                                 mft.seek(((mft.tell() + 0x07) & ~0x07))
 
-                                print(f"3 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_long}")
+                                # print(f"3 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_long}")
 
                             else:
                                 mft.seek(-(common_attribute_header.attr_length), 1)  # Move first $FILE_NAME
@@ -73,7 +73,7 @@ def parse_mft(mft_path, output_path):
                                 file_name_short = read_file_name(mft, file_name_attribute)
                                 mft.seek(((mft.tell() + 0x07) & ~0x07))
 
-                                print(f"2 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_short}")
+                                # print(f"2 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_short}")
                         
                         else:
                             mft.seek(-(common_attribute_header.attr_length), 1)  # Move first $FILE_NAME
@@ -82,7 +82,7 @@ def parse_mft(mft_path, output_path):
                             file_name_long = read_file_name(mft, file_name_attribute)
                             mft.seek(((mft.tell() + 0x07) & ~0x07))
 
-                            print(f"1 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_long}")
+                            # print(f"1 {hex(current_number_of_mft_entry)} {hex((mft.tell() + 0x07) & ~0x07)} File Name : {file_name_long}")
 
                     elif (common_attribute_header.attr_type == 0x80):  # $DATA
                         COMMON_HDR_SIZE = struct.calcsize(COMMON_ATTRIBUTE_HEADER_STRUCTURE)
@@ -115,7 +115,7 @@ def parse_mft(mft_path, output_path):
                             runlist = runlist[:pos]
 
                             runlist_preview = runlist.hex() if runlist else ""
-                            print(f"File Size: 0x{file_size:X}, Slack Size: 0x{file_slack_size:X}, Runlist: {runlist_preview}, LengthOfRunlist: 0x{size_of_runlist:X}")
+                            # print(f"File Size: 0x{file_size:X}, Slack Size: 0x{file_slack_size:X}, Runlist: {runlist_preview}, LengthOfRunlist: 0x{size_of_runlist:X}")
 
                             data_resident_flag = 0x01
                             data_file_size = file_size
@@ -135,7 +135,7 @@ def parse_mft(mft_path, output_path):
                                 file_size = 0
                             file_data = mft.read(file_size)
                             data_preview = file_data.hex() if file_data else ""
-                            print(f"File Size: 0x{file_size:X},  slack Size: 0x{slack_size:X}, Data: 0x{data_preview}")
+                            # print(f"File Size: 0x{file_size:X},  slack Size: 0x{slack_size:X}, Data: 0x{data_preview}")
 
                             data_resident_flag = 0x00
                             data_file_size = file_size
@@ -184,7 +184,6 @@ def parse_mft(mft_path, output_path):
                 pass
 
             current_number_of_mft_entry = current_number_of_mft_entry + 1
-            print()
 
         flush_buffer()
 
